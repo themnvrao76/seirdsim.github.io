@@ -1,0 +1,571 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Advanced Pandemic Simulator (Interactive SEIRD)</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <style>
+    :root{
+      --back:#15151b; --panel:#101014; --accent:#ef476f;
+      --exposed:#ffd966; --good:#13b6b6; --glass:rgba(255,255,255,0.07);
+      --font:Inter,system-ui,Arial,sans-serif;
+    }
+    html,body{height:100%;margin:0;background:var(--back);
+      font-family:var(--font);color:#e5e5e5;overflow:hidden}
+    #wrap{display:flex;height:100%}
+    /* PANEL */
+    #panel{
+      width:350px;min-width:300px;background:var(--panel);
+      padding:20px;box-sizing:border-box;
+      display:flex;flex-direction:column;row-gap:18px;
+      height:100vh;overflow-y:auto;
+      box-shadow:2px 0 6px #000a;
+    }
+    h2{margin:0 0 12px;font-size:19px}
+    .legend-row{display:flex;align-items:center;margin-bottom:6px;font-size:14px}
+    .box{width:18px;height:18px;border:1px solid #555;border-radius:4px;margin-right:8px}
+    #counts div{font-size:14px;margin-bottom:4px}
+    button{
+      background:#444;border:none;padding:7px 15px;
+      border-radius:6px;color:#ddd;font-size:13px;
+      cursor:pointer;transition:background .25s;
+    }
+    button:hover{background:#666}
+    /* SLIDERS */
+    .control{margin-bottom:10px}
+    label{font-size:13px;display:block;margin-bottom:4px;color:#bbb}
+    input[type=range]{
+      width:100%;height:6px;border-radius:3px;
+      background:#333;outline:none;-webkit-appearance:none;
+    }
+    input[type=range]::-webkit-slider-thumb{
+      width:14px;height:14px;border-radius:50%;
+      background:var(--accent);cursor:pointer;
+      -webkit-appearance:none;transition:transform .2s;
+    }
+    input[type=range]:active::-webkit-slider-thumb{transform:scale(1.3)}
+    .value{font-size:12px;margin-left:6px;color:#888}
+    /* CANVAS & VIGNETTE */
+    #world{flex:1;height:100%}
+    #vignette{
+      position:absolute;inset:0;
+      background:radial-gradient(circle at center,
+        transparent 60%,rgba(0,0,0,.5));
+      pointer-events:none;
+    }
+    /* LIVE MICRO-CHART */
+    #liveWrap{
+      position:absolute;right:18px;bottom:18px;
+      width:300px;height:180px;
+      background:var(--panel);border-radius:12px;
+      padding:12px 16px 10px;box-sizing:border-box;
+      box-shadow:0 0 8px #0009;
+    }
+    #liveWrap h3{margin:0 0 6px;font-size:13px;color:#bbb;text-align:center}
+    #livePlot{width:100%;height:120px}
+  </style>
+</head>
+<body>
+  <div id="wrap">
+    <!-- LEFT PANEL -->
+    <div id="panel">
+      <div>
+        <h2>Legend</h2>
+        <div class="legend-row"><span class="box" style="background:#fff8f0"></span>Healthy</div>
+        <div class="legend-row"><span class="box" style="background:var(--exposed)"></span>Exposed</div>
+        <div class="legend-row"><span class="box" style="background:var(--accent)"></span>Infected</div>
+        <div class="legend-row"><span class="box" style="background:var(--good)"></span>Immune</div>
+        <div class="legend-row"><span class="box" style="background:var(--back)"></span>Dead</div>
+      </div>
+      <div id="counts">
+        <div>Population   <strong id="pop"></strong></div>
+        <div>Healthy      <strong id="healthy"></strong></div>
+        <div>Exposed      <strong id="exposed"></strong></div>
+        <div>Infected     <strong id="infected"></strong></div>
+        <div>Immune       <strong id="immune"></strong></div>
+        <div>Dead         <strong id="dead"></strong></div>
+        <div style="font-size:12px;color:#888;margin-top:6px">FPS <span id="fps">0</span></div>
+      </div>
+      <div>
+        <h2>Controls</h2>
+        <div class="control">
+          <label>Speed <span class="value" id="vSpeed"></span></label>
+          <input type="range" id="speed" min="0" max="4" step="0.1" value="1">
+        </div>
+        <div class="control">
+          <label>Population <span class="value" id="vPop"></span></label>
+          <input type="range" id="popRange" min="200" max="20000" step="100" value="1200">
+        </div>
+        <div class="control">
+          <label>Infectivity (%) <span class="value" id="vCatch"></span></label>
+          <input type="range" id="catch" min="0" max="100" step="1" value="30">
+        </div>
+        <div class="control">
+          <label>Incubation (frames) <span class="value" id="vInc"></span></label>
+          <input type="range" id="incub" min="10" max="300" step="10" value="150">
+        </div>
+        <div class="control">
+          <label>Recovery (frames) <span class="value" id="vRec"></span></label>
+          <input type="range" id="recov" min="50" max="800" step="25" value="450">
+        </div>
+        <div class="control">
+          <label>Death prob (‰/frame) <span class="value" id="vDeath"></span></label>
+          <input type="range" id="death" min="0" max="10" step="0.1" value="2">
+        </div>
+        <button id="apply">Apply &amp; Restart</button>
+        <button id="summaryBtn" style="margin-top:8px">Get Summary</button>
+        <button id="reportBtn" style="margin-top:8px;background:var(--good)">Generate Report</button>
+        <button id="exportBtn" style="margin-top:8px;background:#4b88c2">Export Data</button>
+      </div>
+      <canvas id="mini" height="110"></canvas>
+      <div style="font-size:12px;color:#888;margin-top:auto">
+        ⎵ pause&nbsp;&nbsp; ⏎ restart&nbsp;&nbsp; Esc stop
+      </div>
+    </div>
+    <!-- SIMULATION CANVAS -->
+    <canvas id="world"></canvas>
+  </div>
+  <!-- LIVE MICRO-CHART -->
+  <div id="liveWrap">
+    <h3>Live status</h3>
+    <canvas id="livePlot"></canvas>
+  </div>
+  <div id="vignette"></div>
+
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1"></script>
+  <script>
+    // DOM helper
+    const $ = id => document.getElementById(id);
+
+    // parameters
+    let PARAM = {
+      POP:        1200,
+      SPEED:      1,
+      P_CATCH:    0.3,
+      INCUBATION: 150,
+      RECOVER:    450,
+      DEATH:      0.002
+    };
+
+    // geometry
+    let P_RADIUS=4, INFECT_R=10, CELL_SIZE=22;
+
+    // main canvas
+    let W,H;
+    const cv=document.getElementById('world'),
+          ctx=cv.getContext('2d');
+    function resize(){
+      cv.width = W = window.innerWidth - 350;
+      cv.height= H = window.innerHeight;
+    }
+    window.addEventListener('resize', resize);
+    resize();
+
+    // utils
+    const rand=(a,b)=>Math.random()*(b-a)+a;
+    const clamp=(min,max,v)=>Math.max(min,Math.min(max,v));
+
+    // AGENT
+    class Agent {
+      constructor(){
+        this.x=rand(25,W-25); this.y=rand(25,H-25); this.z=Math.random();
+        const a=rand(0,6.28), v=rand(-0.4,0.4)*PARAM.SPEED;
+        this.dx=v*Math.cos(a); this.dy=v*Math.sin(a);
+        this.state='healthy'; this.rec=0; this.imm=0; this.inc=0;
+      }
+      expose(){
+        if(this.state==='healthy'){
+          this.state='exposed';
+          this.inc=PARAM.INCUBATION;
+        }
+      }
+      infectActual(){
+        this.state='infected';
+        this.rec=PARAM.RECOVER;
+      }
+      move(){
+        const sp=0.8+0.4*this.z;
+        this.x+=this.dx*sp; this.y+=this.dy*sp;
+        if(this.x<25||this.x>W-25){ this.dx*=-1; this.x=clamp(25,W-25,this.x); }
+        if(this.y<25||this.y>H-25){ this.dy*=-1; this.y=clamp(25,H-25,this.y); }
+        this.dx+=rand(-0.08,0.08)*PARAM.SPEED;
+        this.dy+=rand(-0.08,0.08)*PARAM.SPEED;
+        this.dx*=0.97; this.dy*=0.97;
+      }
+      stepHealth(){
+        if(this.state==='exposed'){
+          if(--this.inc<=0) this.infectActual();
+        }
+        else if(this.state==='infected'){
+          if(Math.random()<PARAM.DEATH){ this.state='dead'; return; }
+          if(--this.rec<=0){ this.state='immune'; this.imm=1200; }
+        }
+        else if(this.state==='immune'){
+          if(--this.imm<=0) this.state='healthy';
+        }
+      }
+    }
+
+    // PANDEMIC
+    class Pandemic {
+      constructor(){ this.reset(); }
+      reset(){
+        P_RADIUS=clamp(2,6,180/Math.sqrt(PARAM.POP));
+        INFECT_R=P_RADIUS*2.5;
+        CELL_SIZE=Math.max(18,INFECT_R*2);
+        this.rows=(H/CELL_SIZE)|0; this.cols=(W/CELL_SIZE)|0;
+        this.agents=Array.from({length:PARAM.POP},()=>new Agent());
+        // seed a few
+        for(let i=0;i<5;i++) this.agents[i].expose();
+        this.grid=new Map();
+        this.record=[];
+      }
+      rebuildGrid(){
+        this.grid.clear();
+        for(const a of this.agents){
+          const r=(a.y/CELL_SIZE)|0, c=(a.x/CELL_SIZE)|0, idx=r*this.cols+c;
+          if(!this.grid.has(idx)) this.grid.set(idx,[]);
+          this.grid.get(idx).push(a);
+          a._idx=idx;
+        }
+      }
+      neighbours(idx){
+        const r=(idx/this.cols)|0, c=idx%this.cols, s=this.cols, R=this.rows;
+        return [
+          idx,
+          r>0?idx-s:-1, r<R-1?idx+s:-1,
+          c>0?idx-1:-1, c<s-1?idx+1:-1,
+          r>0&&c>0?idx-s-1:-1,
+          r>0&&c<s-1?idx-s+1:-1,
+          r<R-1&&c>0?idx+s-1:-1,
+          r<R-1&&c<s-1?idx+s+1:-1
+        ].filter(i=>i>=0);
+      }
+      infect(){
+        for(const [idx,cell] of this.grid){
+          if(!cell.some(a=>a.state==='infected')) continue;
+          let hood=[];
+          for(const n of this.neighbours(idx)){
+            const arr=this.grid.get(n);
+            if(arr) hood=hood.concat(arr);
+          }
+          const inf=hood.filter(a=>a.state==='infected'),
+                heal=hood.filter(a=>a.state==='healthy');
+          if(!inf.length||!heal.length) continue;
+          for(const i of inf) for(const h of heal){
+            const dx=i.x-h.x, dy=i.y-h.y;
+            if(dx*dx+dy*dy<INFECT_R*INFECT_R
+               && Math.random()<PARAM.P_CATCH){
+              h.expose();
+            }
+          }
+        }
+      }
+      step(){
+        this.rebuildGrid();
+        this.infect();
+        let counts={healthy:0,exposed:0,infected:0,immune:0,dead:0};
+        for(const a of this.agents){
+          if(a.state!=='dead'){ a.stepHealth(); a.move(); }
+          counts[a.state]++;
+        }
+        this.record.push({...counts});
+      }
+    }
+
+    // offscreen
+    const off=document.createElement('canvas'), octx=off.getContext('2d');
+    function prepareOffscreen(){ off.width=W; off.height=H; }
+    prepareOffscreen(); window.addEventListener('resize',prepareOffscreen);
+
+    // live micro-chart
+    let liveChart;
+    function initLiveChart(){
+      const ctxL=$('livePlot').getContext('2d');
+      liveChart=new Chart(ctxL,{
+        type:'line',
+        data:{labels:[],datasets:[
+          {label:'Healthy',borderColor:'#fff8f0',data:[],tension:0.3},
+          {label:'Exposed',borderColor:'#ffd966',data:[],tension:0.3},
+          {label:'Infected',borderColor:'#ef476f',data:[],tension:0.3},
+          {label:'Immune',borderColor:'#13b6b6',data:[],tension:0.3},
+          {label:'Dead',borderColor:'#888888',data:[],tension:0.3},
+        ]},
+        options:{
+          responsive:false,animation:false,
+          plugins:{legend:{display:false}},
+          scales:{x:{display:false},y:{display:false}},
+          elements:{point:{radius:0},line:{borderWidth:1.5}}
+        }
+      });
+    }
+    initLiveChart();
+
+    // instance & dashboard
+    let sim=new Pandemic();
+    function updateDashboard(){
+      const rec=sim.record[sim.record.length-1];
+      $('pop').textContent=PARAM.POP;
+      $('healthy').textContent=rec.healthy;
+      $('exposed').textContent=rec.exposed;
+      $('infected').textContent=rec.infected;
+      $('immune').textContent=rec.immune;
+      $('dead').textContent=rec.dead;
+      const D=liveChart.data;
+      D.labels.push('');
+      [rec.healthy,rec.exposed,rec.infected,rec.immune,rec.dead].forEach((v,i)=>{
+        D.datasets[i].data.push(v);
+      });
+      if(D.labels.length>120){
+        D.labels.shift();
+        D.datasets.forEach(ds=>ds.data.shift());
+      }
+      liveChart.update('none');
+    }
+
+    // draw agents
+    function drawAgents(tick){
+      octx.clearRect(0,0,W,H);
+      const pH=new Path2D(), pE=new Path2D(),
+            pI=new Path2D(), pM=new Path2D(), r=P_RADIUS;
+      for(const a of sim.agents){
+        const x=a.x,y=a.y;
+        if(a.state==='healthy'){
+          pH.moveTo(x+r,y); pH.arc(x,y,r,0,6.28);
+        } else if(a.state==='exposed'){
+          pE.moveTo(x+r,y); pE.arc(x,y,r,0,6.28);
+        } else if(a.state==='infected'){
+          const glow=0.5+0.4*Math.sin(tick*0.15);
+          octx.fillStyle=`rgba(239,71,111,${0.15*glow})`;
+          octx.beginPath(); octx.arc(x,y,r*2,0,6.28); octx.fill();
+          pI.moveTo(x+r,y); pI.arc(x,y,r,0,6.28);
+        } else if(a.state==='immune'){
+          pM.moveTo(x+r,y); pM.arc(x,y,r,0,6.28);
+        }
+      }
+      octx.fillStyle='#fff8f0'; octx.fill(pH);
+      octx.fillStyle='var(--exposed)'; octx.fill(pE);
+      octx.fillStyle='#ef476f'; octx.fill(pI);
+      octx.fillStyle='#13b6b6'; octx.fill(pM);
+      octx.lineWidth=1.2; octx.strokeStyle='#19bebe'; octx.stroke(pM);
+      octx.strokeStyle='#555'; octx.lineWidth=1;
+      for(const a of sim.agents) if(a.state==='dead'){
+        octx.beginPath();
+        octx.moveTo(a.x-r*0.7,a.y-r*0.7);
+        octx.lineTo(a.x+r*0.7,a.y+r*0.7);
+        octx.moveTo(a.x+r*0.7,a.y-r*0.7);
+        octx.lineTo(a.x-r*0.7,a.y+r*0.7);
+        octx.stroke();
+      }
+      ctx.putImageData(octx.getImageData(0,0,W,H),0,0);
+    }
+
+    // main loop
+    let paused=false,stop=false,frame=0,fps=0,last=performance.now();
+    requestAnimationFrame(function loop(now){
+      if(stop) return;
+      const dt=now-last; last=now;
+      fps=0.9*fps+0.1*(1000/dt);
+      $('fps').textContent=fps.toFixed(0);
+      if(!paused){
+        sim.step(); frame++;
+        drawAgents(frame);
+        updateDashboard();
+      } else {
+        ctx.fillStyle='rgba(21,21,27,0.14)';
+        ctx.fillRect(0,0,W,H);
+      }
+      requestAnimationFrame(loop);
+    });
+
+    // keys & binding
+    window.addEventListener('keydown',e=>{
+      if(e.key===' ') paused=!paused;
+      else if(e.key==='Enter'){
+        sim.reset();
+        liveChart.data.labels=[];
+        liveChart.data.datasets.forEach(ds=>ds.data=[]);
+      }
+      else if(e.key==='Escape') stop=true;
+    });
+
+    function bindVal(label,rangeId,fmt=v=>v){
+      $(label).textContent = fmt($(rangeId).value);
+    }
+    [['speed','vSpeed',v=>v+'×'],
+     ['popRange','vPop'],
+     ['catch','vCatch',v=>v+'%'],
+     ['incub','vInc'],
+     ['recov','vRec'],
+     ['death','vDeath',v=>v+'‰'],
+    ].forEach(([id,lab,fmt])=>{
+      const el=$(id);
+      bindVal(lab,id,fmt);
+      el.oninput = ()=> bindVal(lab,id,fmt);
+    });
+
+    // apply & restart
+    $('apply').onclick = ()=>{
+      PARAM.SPEED     = parseFloat($('speed').value);
+      PARAM.POP       = parseInt($('popRange').value);
+      PARAM.P_CATCH   = parseInt($('catch').value)/100;
+      PARAM.INCUBATION= parseInt($('incub').value);
+      PARAM.RECOVER   = parseInt($('recov').value);
+      PARAM.DEATH     = parseFloat($('death').value)/1000;
+      sim = new Pandemic();
+      liveChart.data.labels=[];
+      liveChart.data.datasets.forEach(ds=>ds.data=[]);
+    };
+
+    // summary modal with Exposed
+    $('summaryBtn').onclick = ()=>{
+      const R = sim.record,
+            N = R.length,
+            labels = Array.from({length:N},(_,i)=>i+1),
+            exposed  = R.map(r=>r.exposed),
+            infected = R.map(r=>r.infected),
+            dead     = R.map(r=>r.dead);
+      const dlg=document.createElement('div');
+      dlg.style='position:fixed;inset:0;background:#000a;display:flex;align-items:center;justify-content:center';
+      dlg.innerHTML=`
+        <div style="background:#fff;padding:20px;border-radius:12px;max-width:90vw;max-height:90vh;overflow:auto">
+          <canvas id="sumChart" width="800" height="450"></canvas>
+          <div style="text-align:right;margin-top:10px">
+            <button id="closeSum" style="padding:6px 14px;border:none;border-radius:6px;background:#444;color:#fff;cursor:pointer">Close</button>
+          </div>
+        </div>`;
+      document.body.appendChild(dlg);
+      new Chart(dlg.querySelector('#sumChart'),{
+        type:'line',
+        data:{
+          labels,
+          datasets:[
+            {label:'Exposed',data:exposed,borderColor:'#ffd966',fill:false,tension:0.2},
+            {label:'Infected',data:infected,borderColor:'#ef476f',fill:false,tension:0.2},
+            {label:'Dead',data:dead,borderColor:'#000000',fill:false,tension:0.2}
+          ]
+        },
+        options:{
+          responsive:true,
+          plugins:{legend:{position:'bottom'}},
+          scales:{
+            x:{title:{display:true,text:'Frame'}},
+            y:{title:{display:true,text:'Count'}}
+          }
+        }
+      });
+      dlg.querySelector('#closeSum').onclick = ()=> dlg.remove();
+    };
+
+    // report modal with SEIRD metrics
+    $('reportBtn').onclick = ()=>{
+      const R=sim.record,
+            totalFrames=R.length,
+            peakExposed = Math.max(...R.map(r=>r.exposed)),
+            peakExFrame= R.findIndex(r=>r.exposed===peakExposed)+1,
+            peakInfected= Math.max(...R.map(r=>r.infected)),
+            peakInfFrame= R.findIndex(r=>r.infected===peakInfected)+1,
+            final=R[R.length-1],
+            params={
+              'Infectivity': (PARAM.P_CATCH*100).toFixed(1)+' %',
+              'Incubation':  PARAM.INCUBATION+' frames',
+              'Recovery':    PARAM.RECOVER+' frames',
+              'Death prob':  (PARAM.DEATH*1000).toFixed(1)+' ‰/frame'
+            };
+      const dlg=document.createElement('div');
+      dlg.style='position:fixed;inset:0;background:#000a;display:flex;align-items:center;justify-content:center;padding:20px';
+      dlg.innerHTML=`
+        <div style="background:#fff;color:#111;padding:24px;border-radius:12px;max-width:800px;width:100%;max-height:90vh;overflow:auto">
+          <h2 style="margin-top:0">Pandemic SEIRD Simulation Report</h2>
+          <h3>1. Mathematical Model</h3>
+          <p>
+            We approximate an SEIRD process:<br>
+            <em>Healthy → Exposed</em> upon contact within radius<br>
+            <em>Exposed → Infected</em> after incubation<br>
+            <em>Infected → Recovered</em> after recovery time<br>
+            <em>Infected → Dead</em> with death probability/frame
+          </p>
+          <h3>2. Parameters</h3>
+          <ul>
+            ${Object.entries(params).map(([k,v])=>`<li><strong>${k}:</strong> ${v}</li>`).join('')}
+          </ul>
+          <h3>3. Key Metrics</h3>
+          <ul>
+            <li><strong>Total frames:</strong> ${totalFrames}</li>
+            <li><strong>Peak exposed:</strong> ${peakExposed} at frame ${peakExFrame}</li>
+            <li><strong>Peak infected:</strong> ${peakInfected} at frame ${peakInfFrame}</li>
+            <li><strong>Final counts:</strong>
+              Healthy ${final.healthy}, Exposed ${final.exposed}, Infected ${final.infected}, Immune ${final.immune}, Dead ${final.dead}
+            </li>
+          </ul>
+          <h3>4. Final SEIRD Breakdown</h3>
+          <canvas id="barChart" width="400" height="250"></canvas>
+          <h3>5. Infection Over Time</h3>
+          <canvas id="lineChart" width="600" height="250"></canvas>
+          <h3>6. Recommendations</h3>
+          <ul>
+            <li>Shorten <em>incubation</em> with rapid testing and isolation.</li>
+            <li>Reduce <em>infectivity</em> via masks and distancing.</li>
+            <li>Improve <em>recovery</em> time with early treatment protocols.</li>
+            <li>Lower <em>death prob</em> by expanding healthcare capacity.</li>
+          </ul>
+          <div style="text-align:right;margin-top:12px">
+            <button id="closeReport" style="padding:8px 16px;border:none;border-radius:6px;background:#444;color:#fff;cursor:pointer">
+              Close
+            </button>
+          </div>
+        </div>`;
+      document.body.appendChild(dlg);
+
+      // bar chart
+      new Chart(dlg.querySelector('#barChart').getContext('2d'),{
+        type:'bar',
+        data:{
+          labels:['Healthy','Exposed','Infected','Immune','Dead'],
+          datasets:[{
+            label:'Final Count',
+            data:[final.healthy, final.exposed, final.infected, final.immune, final.dead],
+            backgroundColor:['#fff8f0','#ffd966','#ef476f','#13b6b6','#888888']
+          }]
+        },
+        options:{responsive:false,scales:{y:{beginAtZero:true,title:{display:true,text:'Count'}}}}
+      });
+
+      // line chart
+      new Chart(dlg.querySelector('#lineChart').getContext('2d'),{
+        type:'line',
+        data:{
+          labels:R.map((_,i)=>i+1),
+          datasets:[
+            {label:'Exposed',data:R.map(r=>r.exposed),borderColor:'#ffd966',fill:false,tension:0.2,pointRadius:0},
+            {label:'Infected',data:R.map(r=>r.infected),borderColor:'#ef476f',fill:false,tension:0.2,pointRadius:0}
+          ]
+        },
+        options:{
+          responsive:false,
+          scales:{x:{title:{display:true,text:'Frame'}},y:{title:{display:true,text:'Count'}}}
+        }
+      });
+
+      dlg.querySelector('#closeReport').onclick = ()=> dlg.remove();
+    };
+
+    // export CSV
+    $('exportBtn').onclick = ()=>{
+      const header = 'frame,healthy,exposed,infected,immune,dead\n';
+      const rows = sim.record.map((r,i)=>
+        `${i+1},${r.healthy},${r.exposed},${r.infected},${r.immune},${r.dead}`
+      ).join('\n');
+      const blob = new Blob([header+rows],{type:'text/csv'});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = 'simulation_data.csv';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    };
+  </script>
+</body>
+</html>
